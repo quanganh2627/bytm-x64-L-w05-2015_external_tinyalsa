@@ -70,9 +70,9 @@ struct pcm;
 /* Bit formats */
 enum pcm_format {
     PCM_FORMAT_S16_LE = 0,
+    PCM_FORMAT_S24_LE,
     PCM_FORMAT_S32_LE,
     PCM_FORMAT_S8,
-    PCM_FORMAT_S24_LE,
 
     PCM_FORMAT_MAX,
 };
