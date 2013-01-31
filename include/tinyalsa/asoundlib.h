@@ -199,6 +199,7 @@ int pcm_mmap_begin(struct pcm *pcm, void **areas, unsigned int *offset,
                    unsigned int *frames);
 int pcm_mmap_commit(struct pcm *pcm, unsigned int offset, unsigned int frames);
 
+int pcm_prepare(struct pcm *pcm);
 /* Start and stop a PCM channel that doesn't transfer data */
 int pcm_start(struct pcm *pcm);
 int pcm_stop(struct pcm *pcm);
