@@ -190,6 +190,8 @@ static unsigned int pcm_format_to_alsa(enum pcm_format format)
     switch (format) {
     case PCM_FORMAT_S32_LE:
         return SNDRV_PCM_FORMAT_S32_LE;
+    case PCM_FORMAT_S24_LE:
+        return SNDRV_PCM_FORMAT_S24_LE;
     default:
     case PCM_FORMAT_S16_LE:
         return SNDRV_PCM_FORMAT_S16_LE;
@@ -200,6 +202,7 @@ static unsigned int pcm_format_to_bits(enum pcm_format format)
 {
     switch (format) {
     case PCM_FORMAT_S32_LE:
+    case PCM_FORMAT_S24_LE:
         return 32;
     default:
     case PCM_FORMAT_S16_LE:
@@ -610,6 +613,13 @@ fail_close:
 int pcm_is_ready(struct pcm *pcm)
 {
     return pcm->fd >= 0;
+}
+
+int pcm_prepare(struct pcm *pcm)
+{
+    if (ioctl(pcm->fd, SNDRV_PCM_IOCTL_PREPARE) < 0)
+        return oops(pcm, errno, "cannot prepare channel");
+    return 0;
 }
 
 int pcm_start(struct pcm *pcm)
