@@ -30,7 +30,6 @@
 #define ASOUNDLIB_H
 
 #include <sys/time.h>
-#include <stddef.h>
 
 #if defined(__cplusplus)
 extern "C" {
@@ -70,7 +69,6 @@ struct pcm;
 /* Bit formats */
 enum pcm_format {
     PCM_FORMAT_S16_LE = 0,
-    PCM_FORMAT_S24_LE,
     PCM_FORMAT_S32_LE,
 
     PCM_FORMAT_MAX,
@@ -200,9 +198,7 @@ int mixer_ctl_get_percent(struct mixer_ctl *ctl, unsigned int id);
 int mixer_ctl_set_percent(struct mixer_ctl *ctl, unsigned int id, int percent);
 
 int mixer_ctl_get_value(struct mixer_ctl *ctl, unsigned int id);
-int mixer_ctl_get_data(struct mixer_ctl *ctl, void *data, size_t len);
 int mixer_ctl_set_value(struct mixer_ctl *ctl, unsigned int id, int value);
-int mixer_ctl_set_data(struct mixer_ctl *ctl, const void *data, size_t len);
 int mixer_ctl_set_enum_by_string(struct mixer_ctl *ctl, const char *string);
 
 /* Determe range of integer mixer controls */
