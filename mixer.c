@@ -91,10 +91,9 @@ void mixer_close(struct mixer *mixer)
 struct mixer *mixer_open(unsigned int card)
 {
     struct snd_ctl_elem_list elist;
-    struct snd_ctl_elem_info tmp;
     struct snd_ctl_elem_id *eid = NULL;
     struct mixer *mixer = NULL;
-    unsigned int n, m;
+    unsigned int n;
     int fd;
     char fn[256];
 
