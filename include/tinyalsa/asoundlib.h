@@ -55,6 +55,7 @@ struct pcm;
                                    * second call to pcm_write will attempt to
                                    * restart the stream.
                                    */
+#define PCM_MONOTONIC  0x00000008 /* see pcm_get_htimestamp */
 
 /* PCM runtime states */
 #define	PCM_STATE_OPEN		0
@@ -156,6 +157,13 @@ int pcm_set_config(struct pcm *pcm, struct pcm_config *config);
 /* Returns a human readable reason for the last error */
 const char *pcm_get_error(struct pcm *pcm);
 
+/* Returns the sample size in bits for a PCM format.
+ * As with ALSA formats, this is the storage size for the format, whereas the
+ * format represents the number of significant bits. For example,
+ * PCM_FORMAT_S24_LE uses 32 bits of storage.
+ */
+unsigned int pcm_format_to_bits(enum pcm_format format);
+
 /* Returns the buffer size (int frames) that should be used for pcm_write. */
 unsigned int pcm_get_buffer_size(struct pcm *pcm);
 unsigned int pcm_frames_to_bytes(struct pcm *pcm, unsigned int frames);
@@ -165,6 +173,8 @@ unsigned int pcm_bytes_to_frames(struct pcm *pcm, unsigned int bytes);
 unsigned int pcm_get_latency(struct pcm *pcm);
 
 /* Returns available frames in pcm buffer and corresponding time stamp.
+ * The clock is CLOCK_MONOTONIC if flag PCM_MONOTONIC was specified in pcm_open,
+ * otherwise the clock is CLOCK_REALTIME.
  * For an input stream, frames available are frames ready for the
  * application to read.
  * For an output stream, frames available are the number of empty frames available
@@ -184,10 +194,12 @@ int pcm_read(struct pcm *pcm, void *data, unsigned int count);
  * mmap() support.
  */
 int pcm_mmap_write(struct pcm *pcm, const void *data, unsigned int count);
+int pcm_mmap_read(struct pcm *pcm, void *data, unsigned int count);
 int pcm_mmap_begin(struct pcm *pcm, void **areas, unsigned int *offset,
                    unsigned int *frames);
 int pcm_mmap_commit(struct pcm *pcm, unsigned int offset, unsigned int frames);
 
+int pcm_prepare(struct pcm *pcm);
 /* Start and stop a PCM channel that doesn't transfer data */
 int pcm_start(struct pcm *pcm);
 int pcm_stop(struct pcm *pcm);
@@ -211,10 +223,16 @@ struct mixer_ctl;
 struct mixer *mixer_open(unsigned int card);
 void mixer_close(struct mixer *mixer);
 
+/* Get info about a mixer */
+const char *mixer_get_name(struct mixer *mixer);
+
 /* Obtain mixer controls */
 unsigned int mixer_get_num_ctls(struct mixer *mixer);
 struct mixer_ctl *mixer_get_ctl(struct mixer *mixer, unsigned int id);
 struct mixer_ctl *mixer_get_ctl_by_name(struct mixer *mixer, const char *name);
+struct mixer_ctl *mixer_get_ctl_by_name_and_index(struct mixer *mixer,
+                                                  const char *name,
+                                                  unsigned int index);
 
 /* Get info about mixer controls */
 const char *mixer_ctl_get_name(struct mixer_ctl *ctl);
@@ -225,14 +243,22 @@ unsigned int mixer_ctl_get_num_enums(struct mixer_ctl *ctl);
 const char *mixer_ctl_get_enum_string(struct mixer_ctl *ctl,
                                       unsigned int enum_id);
 
+/* Some sound cards update their controls due to external events,
+ * such as HDMI EDID byte data changing when an HDMI cable is
+ * connected. This API allows the count of elements to be updated.
+ */
+void mixer_ctl_update(struct mixer_ctl *ctl);
+
 /* Set and get mixer controls */
 int mixer_ctl_get_percent(struct mixer_ctl *ctl, unsigned int id);
 int mixer_ctl_set_percent(struct mixer_ctl *ctl, unsigned int id, int percent);
 
 int mixer_ctl_get_value(struct mixer_ctl *ctl, unsigned int id);
-int mixer_ctl_get_bytes(struct mixer_ctl *ctl, void *data, size_t len);
+int mixer_ctl_get_array(struct mixer_ctl *ctl, void *array, size_t count);
+int mixer_ctl_get_data(struct mixer_ctl *ctl, void *data, size_t len);
 int mixer_ctl_set_value(struct mixer_ctl *ctl, unsigned int id, int value);
-int mixer_ctl_set_bytes(struct mixer_ctl *ctl, const void *data, size_t len);
+int mixer_ctl_set_array(struct mixer_ctl *ctl, const void *array, size_t count);
+int mixer_ctl_set_data(struct mixer_ctl *ctl, const void *data, size_t len);
 int mixer_ctl_set_enum_by_string(struct mixer_ctl *ctl, const char *string);
 
 /* Determe range of integer mixer controls */

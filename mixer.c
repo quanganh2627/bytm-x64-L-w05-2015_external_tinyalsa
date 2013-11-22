@@ -52,7 +52,8 @@ struct mixer_ctl {
 
 struct mixer {
     int fd;
-    struct snd_ctl_elem_info *info;
+    struct snd_ctl_card_info card_info;
+    struct snd_ctl_elem_info *elem_info;
     struct mixer_ctl *ctl;
     unsigned int count;
 };
@@ -79,8 +80,8 @@ void mixer_close(struct mixer *mixer)
         free(mixer->ctl);
     }
 
-    if (mixer->info)
-        free(mixer->info);
+    if (mixer->elem_info)
+        free(mixer->elem_info);
 
     free(mixer);
 
@@ -90,10 +91,9 @@ void mixer_close(struct mixer *mixer)
 struct mixer *mixer_open(unsigned int card)
 {
     struct snd_ctl_elem_list elist;
-    struct snd_ctl_elem_info tmp;
     struct snd_ctl_elem_id *eid = NULL;
     struct mixer *mixer = NULL;
-    unsigned int n, m;
+    unsigned int n;
     int fd;
     char fn[256];
 
@@ -111,8 +111,11 @@ struct mixer *mixer_open(unsigned int card)
         goto fail;
 
     mixer->ctl = calloc(elist.count, sizeof(struct mixer_ctl));
-    mixer->info = calloc(elist.count, sizeof(struct snd_ctl_elem_info));
-    if (!mixer->ctl || !mixer->info)
+    mixer->elem_info = calloc(elist.count, sizeof(struct snd_ctl_elem_info));
+    if (!mixer->ctl || !mixer->elem_info)
+        goto fail;
+
+    if (ioctl(fd, SNDRV_CTL_IOCTL_CARD_INFO, &mixer->card_info) < 0)
         goto fail;
 
     eid = calloc(elist.count, sizeof(struct snd_ctl_elem_id));
@@ -127,28 +130,12 @@ struct mixer *mixer_open(unsigned int card)
         goto fail;
 
     for (n = 0; n < mixer->count; n++) {
-        struct snd_ctl_elem_info *ei = mixer->info + n;
+        struct snd_ctl_elem_info *ei = mixer->elem_info + n;
         ei->id.numid = eid[n].numid;
         if (ioctl(fd, SNDRV_CTL_IOCTL_ELEM_INFO, ei) < 0)
             goto fail;
         mixer->ctl[n].info = ei;
         mixer->ctl[n].mixer = mixer;
-        if (ei->type == SNDRV_CTL_ELEM_TYPE_ENUMERATED) {
-            char **enames = calloc(ei->value.enumerated.items, sizeof(char*));
-            if (!enames)
-                goto fail;
-            mixer->ctl[n].ename = enames;
-            for (m = 0; m < ei->value.enumerated.items; m++) {
-                memset(&tmp, 0, sizeof(tmp));
-                tmp.id.numid = ei->id.numid;
-                tmp.value.enumerated.item = m;
-                if (ioctl(fd, SNDRV_CTL_IOCTL_ELEM_INFO, &tmp) < 0)
-                    goto fail;
-                enames[m] = strdup(tmp.value.enumerated.name);
-                if (!enames[m])
-                    goto fail;
-            }
-        }
     }
 
     free(eid);
@@ -163,6 +150,11 @@ fail:
     else if (fd >= 0)
         close(fd);
     return 0;
+}
+
+const char *mixer_get_name(struct mixer *mixer)
+{
+    return (const char *)mixer->card_info.name;
 }
 
 unsigned int mixer_get_num_ctls(struct mixer *mixer)
@@ -183,16 +175,29 @@ struct mixer_ctl *mixer_get_ctl(struct mixer *mixer, unsigned int id)
 
 struct mixer_ctl *mixer_get_ctl_by_name(struct mixer *mixer, const char *name)
 {
+    return mixer_get_ctl_by_name_and_index(mixer, name, 0);
+}
+
+struct mixer_ctl *mixer_get_ctl_by_name_and_index(struct mixer *mixer,
+                                                  const char *name,
+                                                  unsigned int index)
+{
     unsigned int n;
 
     if (!mixer)
         return NULL;
 
     for (n = 0; n < mixer->count; n++)
-        if (!strcmp(name, (char*) mixer->info[n].id.name))
-            return mixer->ctl + n;
+        if (!strcmp(name, (char*) mixer->elem_info[n].id.name))
+            if (index-- == 0)
+                return mixer->ctl + n;
 
     return NULL;
+}
+
+void mixer_ctl_update(struct mixer_ctl *ctl)
+{
+    ioctl(ctl->mixer->fd, SNDRV_CTL_IOCTL_ELEM_INFO, ctl->info);
 }
 
 const char *mixer_ctl_get_name(struct mixer_ctl *ctl)
@@ -245,14 +250,11 @@ unsigned int mixer_ctl_get_num_values(struct mixer_ctl *ctl)
 
 static int percent_to_int(struct snd_ctl_elem_info *ei, int percent)
 {
-    int range;
+    if ((percent > 100) || (percent < 0)) {
+        return -EINVAL;
+    }
 
-    if (percent > 100)
-        percent = 100;
-    else if (percent < 0)
-        percent = 0;
-
-    range = (ei->value.integer.max - ei->value.integer.min);
+    int range = (ei->value.integer.max - ei->value.integer.min);
 
     return ei->value.integer.min + (range * percent) / 100;
 }
@@ -317,13 +319,14 @@ int mixer_ctl_get_value(struct mixer_ctl *ctl, unsigned int id)
     return 0;
 }
 
-int mixer_ctl_get_bytes(struct mixer_ctl *ctl, void *data, size_t len)
+int mixer_ctl_get_array(struct mixer_ctl *ctl, void *array, size_t count)
 {
     struct snd_ctl_elem_value ev;
     int ret;
+    size_t size;
+    void *source;
 
-    if (!ctl || (len > ctl->info->count) || !len || !data ||
-        (ctl->info->type != SNDRV_CTL_ELEM_TYPE_BYTES))
+    if (!ctl || (count > ctl->info->count) || !count || !array)
         return -EINVAL;
 
     memset(&ev, 0, sizeof(ev));
@@ -333,7 +336,49 @@ int mixer_ctl_get_bytes(struct mixer_ctl *ctl, void *data, size_t len)
     if (ret < 0)
         return ret;
 
-    memcpy(data, ev.value.bytes.data, len);
+    switch (ctl->info->type) {
+    case SNDRV_CTL_ELEM_TYPE_BOOLEAN:
+    case SNDRV_CTL_ELEM_TYPE_INTEGER:
+        size = sizeof(ev.value.integer.value[0]);
+        source = ev.value.integer.value;
+        break;
+
+    case SNDRV_CTL_ELEM_TYPE_BYTES:
+        size = sizeof(ev.value.bytes.data[0]);
+        source = ev.value.bytes.data;
+        break;
+
+    default:
+        return -EINVAL;
+    }
+
+    memcpy(array, source, size * count);
+
+    return 0;
+}
+
+int mixer_ctl_get_data(struct mixer_ctl *ctl, void *data, size_t len)
+{
+    struct snd_ctl_elem_value ev; 
+    int ret;
+
+    if (!ctl || (len > ctl->info->count) || !data)
+        return -EINVAL;
+
+    memset(&ev, 0, sizeof(ev));
+    ev.id.numid = ctl->info->id.numid;
+    ret = ioctl(ctl->mixer->fd, SNDRV_CTL_IOCTL_ELEM_READ, &ev);
+    if (ret < 0)
+        return ret;
+
+    switch (ctl->info->type) {
+    case SNDRV_CTL_ELEM_TYPE_BYTES:
+        memcpy(data, ev.value.bytes.data, len);
+        break;
+
+    default:
+        return -EINVAL;
+    }   
 
     return 0;
 }
@@ -358,11 +403,20 @@ int mixer_ctl_set_value(struct mixer_ctl *ctl, unsigned int id, int value)
         break;
 
     case SNDRV_CTL_ELEM_TYPE_INTEGER:
+        if ((value < mixer_ctl_get_range_min(ctl)) ||
+            (value > mixer_ctl_get_range_max(ctl))) {
+            return -EINVAL;
+        }
+
         ev.value.integer.value[id] = value;
         break;
 
     case SNDRV_CTL_ELEM_TYPE_ENUMERATED:
         ev.value.enumerated.item[id] = value;
+        break;
+
+    case SNDRV_CTL_ELEM_TYPE_BYTES:
+        ev.value.bytes.data[id] = value;
         break;
 
     default:
@@ -372,18 +426,57 @@ int mixer_ctl_set_value(struct mixer_ctl *ctl, unsigned int id, int value)
     return ioctl(ctl->mixer->fd, SNDRV_CTL_IOCTL_ELEM_WRITE, &ev);
 }
 
-int mixer_ctl_set_bytes(struct mixer_ctl *ctl, const void *data, size_t len)
+int mixer_ctl_set_array(struct mixer_ctl *ctl, const void *array, size_t count)
 {
     struct snd_ctl_elem_value ev;
+    size_t size;
+    void *dest;
 
-    if (!ctl || (len > ctl->info->count) || !len || !data ||
-        (ctl->info->type != SNDRV_CTL_ELEM_TYPE_BYTES))
+    if (!ctl || (count > ctl->info->count) || !count || !array)
         return -EINVAL;
 
     memset(&ev, 0, sizeof(ev));
     ev.id.numid = ctl->info->id.numid;
 
-    memcpy(ev.value.bytes.data, data, len);
+    switch (ctl->info->type) {
+    case SNDRV_CTL_ELEM_TYPE_BOOLEAN:
+    case SNDRV_CTL_ELEM_TYPE_INTEGER:
+        size = sizeof(ev.value.integer.value[0]);
+        dest = ev.value.integer.value;
+        break;
+
+    case SNDRV_CTL_ELEM_TYPE_BYTES:
+        size = sizeof(ev.value.bytes.data[0]);
+        dest = ev.value.bytes.data;
+        break;
+
+    default:
+        return -EINVAL;
+    }
+
+    memcpy(dest, array, size * count);
+
+    return ioctl(ctl->mixer->fd, SNDRV_CTL_IOCTL_ELEM_WRITE, &ev);
+}
+
+int mixer_ctl_set_data(struct mixer_ctl *ctl, const void *data, size_t len)
+{
+    struct snd_ctl_elem_value ev;
+
+    if (!ctl || (len > ctl->info->count) || !len || !data)
+        return -EINVAL;
+
+    memset(&ev, 0, sizeof(ev));
+    ev.id.numid = ctl->info->id.numid;
+
+    switch (ctl->info->type) {
+    case SNDRV_CTL_ELEM_TYPE_BYTES:
+        memcpy(ev.value.bytes.data, data, len);
+        break;
+
+    default:
+        return -EINVAL;
+    }
 
     return ioctl(ctl->mixer->fd, SNDRV_CTL_IOCTL_ELEM_WRITE, &ev);
 }
@@ -412,11 +505,51 @@ unsigned int mixer_ctl_get_num_enums(struct mixer_ctl *ctl)
     return ctl->info->value.enumerated.items;
 }
 
+char **mixer_ctl_fill_enum_string(struct mixer_ctl *ctl)
+{
+    struct snd_ctl_elem_info tmp;
+    unsigned int m;
+    char **enames;
+
+    if (ctl->ename) {
+        return ctl->ename;
+    }
+
+    enames = calloc(ctl->info->value.enumerated.items, sizeof(char*));
+    if (!enames)
+        goto fail;
+    ctl->ename = enames;
+    for (m = 0; m < ctl->info->value.enumerated.items; m++) {
+        memset(&tmp, 0, sizeof(tmp));
+        tmp.id.numid = ctl->info->id.numid;
+        tmp.value.enumerated.item = m;
+        if (ioctl(ctl->mixer->fd, SNDRV_CTL_IOCTL_ELEM_INFO, &tmp) < 0)
+            goto fail;
+        enames[m] = strdup(tmp.value.enumerated.name);
+        if (!enames[m])
+            goto fail;
+    }
+    return enames;
+
+fail:
+    if (enames) {
+        for (m = 0; m < ctl->info->value.enumerated.items; m++) {
+            if (enames[m]) {
+                free(enames[m]);
+            }
+        }
+        free(enames);
+        ctl->ename = NULL;
+    }
+    return NULL;
+}
+
 const char *mixer_ctl_get_enum_string(struct mixer_ctl *ctl,
                                       unsigned int enum_id)
 {
     if (!ctl || (ctl->info->type != SNDRV_CTL_ELEM_TYPE_ENUMERATED) ||
-        (enum_id >= ctl->info->value.enumerated.items))
+        (enum_id >= ctl->info->value.enumerated.items) ||
+        !mixer_ctl_fill_enum_string(ctl))
         return NULL;
 
     return (const char *)ctl->ename[enum_id];
@@ -428,7 +561,8 @@ int mixer_ctl_set_enum_by_string(struct mixer_ctl *ctl, const char *string)
     struct snd_ctl_elem_value ev;
     int ret;
 
-    if (!ctl || (ctl->info->type != SNDRV_CTL_ELEM_TYPE_ENUMERATED))
+    if (!ctl || (ctl->info->type != SNDRV_CTL_ELEM_TYPE_ENUMERATED) ||
+        !mixer_ctl_fill_enum_string(ctl))
         return -EINVAL;
 
     num_enums = ctl->info->value.enumerated.items;
