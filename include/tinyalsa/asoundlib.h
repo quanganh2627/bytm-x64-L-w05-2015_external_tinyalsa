@@ -70,9 +70,9 @@ struct pcm;
 /* Bit formats */
 enum pcm_format {
     PCM_FORMAT_S16_LE = 0,
-    PCM_FORMAT_S24_LE,
     PCM_FORMAT_S32_LE,
     PCM_FORMAT_S8,
+    PCM_FORMAT_S24_LE,
 
     PCM_FORMAT_MAX,
 };
@@ -188,7 +188,6 @@ int pcm_mmap_begin(struct pcm *pcm, void **areas, unsigned int *offset,
                    unsigned int *frames);
 int pcm_mmap_commit(struct pcm *pcm, unsigned int offset, unsigned int frames);
 
-int pcm_prepare(struct pcm *pcm);
 /* Start and stop a PCM channel that doesn't transfer data */
 int pcm_start(struct pcm *pcm);
 int pcm_stop(struct pcm *pcm);
@@ -216,9 +215,6 @@ void mixer_close(struct mixer *mixer);
 unsigned int mixer_get_num_ctls(struct mixer *mixer);
 struct mixer_ctl *mixer_get_ctl(struct mixer *mixer, unsigned int id);
 struct mixer_ctl *mixer_get_ctl_by_name(struct mixer *mixer, const char *name);
-struct mixer_ctl *mixer_get_ctl_by_name_and_index(struct mixer *mixer,
-                                                  const char *name,
-                                                  unsigned int index);
 
 /* Get info about mixer controls */
 const char *mixer_ctl_get_name(struct mixer_ctl *ctl);
@@ -234,10 +230,8 @@ int mixer_ctl_get_percent(struct mixer_ctl *ctl, unsigned int id);
 int mixer_ctl_set_percent(struct mixer_ctl *ctl, unsigned int id, int percent);
 
 int mixer_ctl_get_value(struct mixer_ctl *ctl, unsigned int id);
-int mixer_ctl_get_data(struct mixer_ctl *ctl, void *data, size_t len);
 int mixer_ctl_get_bytes(struct mixer_ctl *ctl, void *data, size_t len);
 int mixer_ctl_set_value(struct mixer_ctl *ctl, unsigned int id, int value);
-int mixer_ctl_set_data(struct mixer_ctl *ctl, const void *data, size_t len);
 int mixer_ctl_set_bytes(struct mixer_ctl *ctl, const void *data, size_t len);
 int mixer_ctl_set_enum_by_string(struct mixer_ctl *ctl, const char *string);
 
