@@ -257,6 +257,7 @@ struct pcm {
     void *mmap_buffer;
     unsigned int noirq_frames_per_msec;
     int wait_for_avail_min;
+    long pcm_delay;
 };
 
 unsigned int pcm_get_buffer_size(struct pcm *pcm)
@@ -1282,4 +1283,12 @@ int pcm_mmap_read(struct pcm *pcm, void *data, unsigned int count)
         return -ENOSYS;
 
     return pcm_mmap_transfer(pcm, data, count);
+}
+
+int pcm_delay(struct pcm *pcm)
+{
+    if (ioctl(pcm->fd, SNDRV_PCM_IOCTL_DELAY, &pcm->pcm_delay) < 0)
+        return -ENOSYS;
+
+    return 0;
 }
